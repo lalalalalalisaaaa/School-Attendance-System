@@ -37,7 +37,7 @@ def send_sms(phone, parent, name, grade, section, kind, ts):
     
     greeting = get_greeting()
     parent_part = f" {parent}" if parent else ""
-    msg = f"{greeting}{parent_part}, your child {name} ({grade} - {section}) has recorded {kind} at school on {ts}."
+    msg = f"{greeting}{parent_part}, your child {name} ({grade} - {section}) has recorded {kind} at Payatas B. Elementary School on {ts}."
     
     try:
         r = requests.post(f"https://api.textbee.dev/api/v1/gateway/devices/{TEXTBEE_DEVICE_ID}/send-sms",
