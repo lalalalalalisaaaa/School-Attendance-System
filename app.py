@@ -103,7 +103,6 @@ def register_student():
     else:
         face_roi = k_img
         
-    # I-normalize ang liwanag at i-resize nang pareho
     face_roi = cv2.resize(face_roi, (150, 150))
     face_roi = cv2.equalizeHist(face_roi)
     cv2.imwrite(os.path.join(FACES_DIR, f"{sid}.jpg"), face_roi)
@@ -149,7 +148,6 @@ def verify_face():
             if val > max_s: max_s, best_sid = val, sid
         except: continue
         
-    # Saktong threshold para kumilala nang tama pero hindi nagkakamali sa iba
     if max_s < 0.60 or not best_sid: return jsonify({'ok': False, 'message': 'Face not recognized.'})
     
     conn = sqlite3.connect(DB_PATH)
