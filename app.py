@@ -27,7 +27,7 @@ def init_db():
 init_db()
 
 def get_greeting():
-    h = datetime.now().hour
+    h = datetime.now(ZoneInfo("Asia/Manila")).hour
     return "Good morning" if h < 12 else ("Good afternoon" if h < 18 else "Good evening")
 
 def send_sms(phone, parent, name, grade, section, kind, ts):
@@ -149,7 +149,7 @@ def verify():
         return jsonify({'ok': False, 'message': 'Student not found.'})
     
     name, grade, section, parent, phone = student
-    ts = datetime.now(ZoneInfo("Asia/Manila:)).strftime("%Y-%m-%d %I:%M %p")
+    ts = datetime.now(ZoneInfo("Asia/Manila")).strftime("%Y-%m-%d %I:%M %p")
     
     conn.cursor().execute("INSERT INTO attendance (student_id, name, grade, section, kind, timestamp) VALUES (?, ?, ?, ?, ?, ?)", (sid, name, grade, section, kind, ts))
     conn.commit()
