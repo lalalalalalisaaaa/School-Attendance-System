@@ -107,12 +107,12 @@ def verify_face():
     if os.path.exists(temp_path): os.remove(temp_path)
     if target_img is None: return jsonify({'ok': False, 'message': 'Image error.'})
     
-    tf = face_cas.detectMultiScale(target_img, 1.1, 3)
+    tf = face_cas.detectMultiScale(target_img, 1.1, 5, minSize=(50, 50))
     if len(tf) == 0:
         return jsonify({'ok': False, 'message': 'No face detected. Please face the camera properly.'})
     
     (x, y, w, h) = tf[0]
-    t_roi = cv2.resize(target_img[y:y+h, x:x+w], (150, 150))
+    t_roi = cv2.resize(target_img[y:y+h, x:x+w], (100, 100))
     
     best_sid, max_s = None, 0.0
     for file in os.listdir(FACES_DIR):
@@ -120,18 +120,18 @@ def verify_face():
         sid = file.split('.')[0]
         k_img = cv2.imread(os.path.join(FACES_DIR, file), cv2.IMREAD_GRAYSCALE)
         if k_img is None: continue
-        kf = face_cas.detectMultiScale(k_img, 1.1, 3)
+        kf = face_cas.detectMultiScale(k_img, 1.1, 5, minSize=(50, 50))
         if len(kf) == 0: continue
         
         (kx, ky, kw, kh) = kf[0]
-        k_roi = cv2.resize(k_img[ky:ky+kh, kx:kx+kw], (150, 150))
+        k_roi = cv2.resize(k_img[ky:ky+kh, kx:kx+kw], (100, 100))
         try:
             res = cv2.matchTemplate(t_roi, k_roi, cv2.TM_CCOEFF_NORMED)
             _, val, _, _ = cv2.minMaxLoc(res)
             if val > max_s: max_s, best_sid = val, sid
         except: continue
         
-    if max_s < 0.68 or not best_sid: 
+    if max_s < 0.82 or not best_sid: 
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
     
     conn = sqlite3.connect(DB_PATH)
@@ -141,8 +141,6 @@ def verify_face():
     if not row:
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
         
-    return jsonify({'ok': True, 'message': f'Verified: {row[1]}', 'student_id': row[0], 'name': row[1], 'grade': row[2], 'section': row[3]})
-    conn.close()
     return jsonify({'ok': True, 'message': f'Verified: {row[1]}', 'student_id': row[0], 'name': row[1], 'grade': row[2], 'section': row[3]})
 
 @app.route('/api/qr/<sid>')
