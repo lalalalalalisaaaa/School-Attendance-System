@@ -124,7 +124,7 @@ def verify_face():
             if val > max_s: max_s, best_sid = val, sid
         except: continue
         
-    if max_s < 0.55 or not best_sid: return jsonify({'ok': False, 'message': 'Face not recognized.'})
+    if max_s < 0.65 or not best_sid: return jsonify({'ok': False, 'message': 'Face not recognized.'})
     
     conn = sqlite3.connect(DB_PATH)
     row = conn.cursor().execute("SELECT student_id, name, grade, section FROM students WHERE student_id=?", (best_sid,)).fetchone()
