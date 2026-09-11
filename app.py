@@ -37,7 +37,7 @@ def send_sms(phone, parent, name, grade, section, kind, ts):
     
     greeting = get_greeting()
     parent_part = f" {parent}" if parent else ""
-    msg = f"{greeting}{parent_part}, your child {name} ({grade} - {section}) has recorded {kind} at Payatas B. Elementary School on {ts}."
+    msg = f"{greeting}{parent_part}, your child {name} ({grade} - {section}) has recorded {kind} at school on {ts}."
     
     try:
         r = requests.post(f"https://api.textbee.dev/api/v1/gateway/devices/{TEXTBEE_DEVICE_ID}/send-sms",
@@ -107,12 +107,8 @@ def verify_face():
     if os.path.exists(temp_path): os.remove(temp_path)
     if target_img is None: return jsonify({'ok': False, 'message': 'Image error.'})
     
-    tf = face_cas.detectMultiScale(target_img, 1.1, 5, minSize=(50, 50))
-    if len(tf) == 0:
-        return jsonify({'ok': False, 'message': 'No face detected. Please face the camera properly.'})
-    
-    (x, y, w, h) = tf[0]
-    t_roi = cv2.resize(target_img[y:y+h, x:x+w], (100, 100))
+    tf = face_cas.detectMultiScale(target_img, 1.1, 3)
+    t_roi = cv2.resize(target_img[tf[0][1]:tf[0][1]+tf[0][3], tf[0][0]:tf[0][0]+tf[0][2]] if len(tf) > 0 else target_img, (150, 150))
     
     best_sid, max_s = None, 0.0
     for file in os.listdir(FACES_DIR):
@@ -120,27 +116,19 @@ def verify_face():
         sid = file.split('.')[0]
         k_img = cv2.imread(os.path.join(FACES_DIR, file), cv2.IMREAD_GRAYSCALE)
         if k_img is None: continue
-        kf = face_cas.detectMultiScale(k_img, 1.1, 5, minSize=(50, 50))
-        if len(kf) == 0: continue
-        
-        (kx, ky, kw, kh) = kf[0]
-        k_roi = cv2.resize(k_img[ky:ky+kh, kx:kx+kw], (100, 100))
+        kf = face_cas.detectMultiScale(k_img, 1.1, 3)
+        k_roi = cv2.resize(k_img[kf[0][1]:kf[0][1]+kf[0][3], kf[0][0]:kf[0][0]+kf[0][2]] if len(kf) > 0 else k_img, (150, 150))
         try:
             res = cv2.matchTemplate(t_roi, k_roi, cv2.TM_CCOEFF_NORMED)
             _, val, _, _ = cv2.minMaxLoc(res)
             if val > max_s: max_s, best_sid = val, sid
         except: continue
         
-    if max_s < 0.75 or not best_sid: 
-        return jsonify({'ok': False, 'message': 'Face not recognized.'})
+    if max_s < 0.55 or not best_sid: return jsonify({'ok': False, 'message': 'Face not recognized.'})
     
     conn = sqlite3.connect(DB_PATH)
     row = conn.cursor().execute("SELECT student_id, name, grade, section FROM students WHERE student_id=?", (best_sid,)).fetchone()
     conn.close()
-    
-    if not row:
-        return jsonify({'ok': False, 'message': 'Face not recognized.'})
-        
     return jsonify({'ok': True, 'message': f'Verified: {row[1]}', 'student_id': row[0], 'name': row[1], 'grade': row[2], 'section': row[3]})
 
 @app.route('/api/qr/<sid>')
@@ -161,7 +149,7 @@ def verify():
         return jsonify({'ok': False, 'message': 'Student not found.'})
     
     name, grade, section, parent, phone = student
-    ts = datetime.now(ZoneInfo("Asia/Manila")).strftime("%Y-%m-%d %I:%M %p")
+    ts = datetime.now(ZoneInfo("Asia/Manila:)).strftime("%Y-%m-%d %I:%M %p")
     
     conn.cursor().execute("INSERT INTO attendance (student_id, name, grade, section, kind, timestamp) VALUES (?, ?, ?, ?, ?, ?)", (sid, name, grade, section, kind, ts))
     conn.commit()
@@ -202,3 +190,4 @@ def export_attendance():
 if __name__ == '__main__':
     threading.Timer(1.2, lambda: webbrowser.open_new("http://127.0.0.1:5000")).start()
     app.run(debug=False, port=5000)
+
