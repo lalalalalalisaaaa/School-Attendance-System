@@ -37,7 +37,7 @@ def send_sms(phone, parent, name, grade, section, kind, ts):
     
     greeting = get_greeting()
     parent_part = f" {parent}" if parent else ""
-    msg = f"{greeting}{parent_part}, your child {name} ({grade} - {section}) has recorded {kind} at Payatas B. Elementary School on {ts}."
+    msg = f"{greeting}{parent_part}, your child {name} ({grade} - {section}) has recorded {kind} at school on {ts}."
     
     try:
         r = requests.post(f"https://api.textbee.dev/api/v1/gateway/devices/{TEXTBEE_DEVICE_ID}/send-sms",
@@ -86,7 +86,27 @@ def register_student():
         return jsonify({'ok': False, 'message': 'All fields are required.'})
     
     sid = f.get('student_id')
-    request.files.get('face_image').save(os.path.join(FACES_DIR, f"{sid}.jpg"))
+    img_file = request.files.get('face_image')
+    temp_reg_path = os.path.join(BASE_DIR, f"temp_reg_{sid}.jpg")
+    img_file.save(temp_reg_path)
+    
+    k_img = cv2.imread(temp_reg_path, cv2.IMREAD_GRAYSCALE)
+    if os.path.exists(temp_reg_path): os.remove(temp_reg_path)
+    if k_img is None: return jsonify({'ok': False, 'message': 'Invalid image file.'})
+    
+    face_cas = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    kf = face_cas.detectMultiScale(k_img, 1.1, 4)
+    
+    if len(kf) > 0:
+        x, y, w, h = kf[0]
+        face_roi = k_img[y:y+h, x:x+w]
+    else:
+        face_roi = k_img
+        
+    # I-normalize ang liwanag at i-resize nang pareho
+    face_roi = cv2.resize(face_roi, (150, 150))
+    face_roi = cv2.equalizeHist(face_roi)
+    cv2.imwrite(os.path.join(FACES_DIR, f"{sid}.jpg"), face_roi)
     
     conn = sqlite3.connect(DB_PATH)
     conn.cursor().execute("REPLACE INTO students VALUES (?, ?, ?, ?, ?, ?)", (sid, f.get('name'), f.get('grade'), f.get('section'), f.get('parent'), f.get('phone')))
@@ -99,7 +119,7 @@ def verify_face():
     img = request.files.get('face_scan')
     if not img: return jsonify({'ok': False, 'message': 'No image.'})
     
-    temp_path = os.path.join(BASE_DIR, "temp.jpg")
+    temp_path = os.path.join(BASE_DIR, "temp_scan.jpg")
     img.save(temp_path)
     
     face_cas = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -107,24 +127,30 @@ def verify_face():
     if os.path.exists(temp_path): os.remove(temp_path)
     if target_img is None: return jsonify({'ok': False, 'message': 'Image error.'})
     
-    tf = face_cas.detectMultiScale(target_img, 1.1, 3)
-    t_roi = cv2.resize(target_img[tf[0][1]:tf[0][1]+tf[0][3], tf[0][0]:tf[0][0]+tf[0][2]] if len(tf) > 0 else target_img, (150, 150))
+    tf = face_cas.detectMultiScale(target_img, 1.1, 4)
+    if len(tf) > 0:
+        x, y, w, h = tf[0]
+        t_roi = target_img[y:y+h, x:x+w]
+    else:
+        t_roi = target_img
+        
+    t_roi = cv2.resize(t_roi, (150, 150))
+    t_roi = cv2.equalizeHist(t_roi)
     
     best_sid, max_s = None, 0.0
     for file in os.listdir(FACES_DIR):
         if not file.endswith('.jpg'): continue
         sid = file.split('.')[0]
-        k_img = cv2.imread(os.path.join(FACES_DIR, file), cv2.IMREAD_GRAYSCALE)
-        if k_img is None: continue
-        kf = face_cas.detectMultiScale(k_img, 1.1, 3)
-        k_roi = cv2.resize(k_img[kf[0][1]:kf[0][1]+kf[0][3], kf[0][0]:kf[0][0]+kf[0][2]] if len(kf) > 0 else k_img, (150, 150))
+        k_roi = cv2.imread(os.path.join(FACES_DIR, file), cv2.IMREAD_GRAYSCALE)
+        if k_roi is None: continue
         try:
             res = cv2.matchTemplate(t_roi, k_roi, cv2.TM_CCOEFF_NORMED)
             _, val, _, _ = cv2.minMaxLoc(res)
             if val > max_s: max_s, best_sid = val, sid
         except: continue
         
-    if max_s < 0.65 or not best_sid: return jsonify({'ok': False, 'message': 'Face not recognized.'})
+    # Saktong threshold para kumilala nang tama pero hindi nagkakamali sa iba
+    if max_s < 0.60 or not best_sid: return jsonify({'ok': False, 'message': 'Face not recognized.'})
     
     conn = sqlite3.connect(DB_PATH)
     row = conn.cursor().execute("SELECT student_id, name, grade, section FROM students WHERE student_id=?", (best_sid,)).fetchone()
@@ -190,4 +216,3 @@ def export_attendance():
 if __name__ == '__main__':
     threading.Timer(1.2, lambda: webbrowser.open_new("http://127.0.0.1:5000")).start()
     app.run(debug=False, port=5000)
-
