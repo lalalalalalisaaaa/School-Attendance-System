@@ -131,7 +131,7 @@ def verify_face():
             if val > max_s: max_s, best_sid = val, sid
         except: continue
         
-    if max_s < 0.82 or not best_sid: 
+    if max_s < 0.75 or not best_sid: 
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
     
     conn = sqlite3.connect(DB_PATH)
