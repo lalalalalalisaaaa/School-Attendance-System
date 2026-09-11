@@ -1,5 +1,6 @@
 import os, cv2, sqlite3, requests, webbrowser, threading, csv, io
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, jsonify, send_file, session, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -148,7 +149,7 @@ def verify():
         return jsonify({'ok': False, 'message': 'Student not found.'})
     
     name, grade, section, parent, phone = student
-    ts = datetime.now().strftime("%Y-%m-%d %I:%M %p")
+    ts = datetime.now(ZoneInfo("Asia/Manila")).strftime("%Y-%m-%d %I:%M %p")
     
     conn.cursor().execute("INSERT INTO attendance (student_id, name, grade, section, kind, timestamp) VALUES (?, ?, ?, ?, ?, ?)", (sid, name, grade, section, kind, ts))
     conn.commit()
