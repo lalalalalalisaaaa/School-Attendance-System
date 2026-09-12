@@ -3,6 +3,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, jsonify, send_file, session, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
+import face_recognition
+import numpy as np
 
 app = Flask(__name__)
 app.secret_key = "attendance-system-secure-key"
@@ -90,22 +92,19 @@ def register_student():
     temp_reg_path = os.path.join(BASE_DIR, f"temp_reg_{sid}.jpg")
     img_file.save(temp_reg_path)
     
-    k_img = cv2.imread(temp_reg_path, cv2.IMREAD_GRAYSCALE)
+    # Basahin gamit ang face_recognition para makuha ang tunay na facial encoding
+    image = face_recognition.load_image_file(temp_reg_path)
+    encodings = face_recognition.face_encodings(image)
+    
     if os.path.exists(temp_reg_path): os.remove(temp_reg_path)
-    if k_img is None: return jsonify({'ok': False, 'message': 'Invalid image file.'})
     
-    face_cas = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    kf = face_cas.detectMultiScale(k_img, 1.1, 4)
+    if len(encodings) == 0:
+        return jsonify({'ok': False, 'message': 'No face detected in the image. Please try again.'})
     
-    if len(kf) > 0:
-        x, y, w, h = kf[0]
-        face_roi = k_img[y:y+h, x:x+w]
-    else:
-        face_roi = k_img
-        
-    face_roi = cv2.resize(face_roi, (200, 200))
-    face_roi = cv2.equalizeHist(face_roi)
-    cv2.imwrite(os.path.join(FACES_DIR, f"{sid}.jpg"), face_roi)
+    # I-save ang buong original image para magamit sa pag-verify ng face_recognition
+    img_file.seek(0)
+    save_path = os.path.join(FACES_DIR, f"{sid}.jpg")
+    img_file.save(save_path)
     
     conn = sqlite3.connect(DB_PATH)
     conn.cursor().execute("REPLACE INTO students VALUES (?, ?, ?, ?, ?, ?)", (sid, f.get('name'), f.get('grade'), f.get('section'), f.get('parent'), f.get('phone')))
@@ -113,34 +112,25 @@ def register_student():
     conn.close()
     return jsonify({'ok': True, 'message': f"Student {f.get('name')} registered!"})
 
-def process_face(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
-    if len(faces) == 0:
-        return None
-    (x, y, w, h) = max(faces, key=lambda f: f[2] * f[3])
-    face_roi = gray[y:y+h, x:x+w]
-    face_resized = cv2.resize(face_roi, (200, 200))
-    return cv2.equalizeHist(face_resized)
-
 @app.route('/api/verify_face', methods=['POST'])
 def verify_face():
     img = request.files.get('face_scan')
     if not img: return jsonify({'ok': False, 'message': 'No image.'})
+    
     temp_path = os.path.join(BASE_DIR, "temp_scan.jpg")
     img.save(temp_path)
-    target_img = cv2.imread(temp_path)
-    if os.path.exists(temp_path): os.remove(temp_path)
-    if target_img is None: return jsonify({'ok': False, 'message': 'Image error.'})
     
-    processed_incoming = process_face(target_img)
-    if processed_incoming is None:
+    unknown_image = face_recognition.load_image_file(temp_path)
+    if os.path.exists(temp_path): os.remove(temp_path)
+    
+    unknown_encodings = face_recognition.face_encodings(unknown_image)
+    if len(unknown_encodings) == 0:
         return jsonify({'ok': False, 'message': 'No face detected.'})
         
-    best_sid, highest_score = None, -1.0
-    hist_incoming = cv2.calcHist([processed_incoming], [0], None, [256], [0, 256])
-    cv2.normalize(hist_incoming, hist_incoming, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+    unknown_encoding = unknown_encodings[0]
+    
+    best_sid = None
+    min_distance = 0.6  # Mas mababa, mas istrikto at sigurado ang pagkakapareho
     
     if not os.path.exists(FACES_DIR):
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
@@ -148,26 +138,30 @@ def verify_face():
     for filename in os.listdir(FACES_DIR):
         if not filename.endswith(".jpg"): continue
         student_id = filename.split(".")[0]
-        reg_img = cv2.imread(os.path.join(FACES_DIR, filename), cv2.IMREAD_GRAYSCALE)
-        if reg_img is None: continue
+        known_image_path = os.path.join(FACES_DIR, filename)
         
-        reg_resized = cv2.resize(reg_img, (200, 200))
-        hist_reg = cv2.calcHist([reg_resized], [0], None, [256], [0, 256])
-        cv2.normalize(hist_reg, hist_reg, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+        known_image = face_recognition.load_image_file(known_image_path)
+        known_encodings = face_recognition.face_encodings(known_image)
         
-        similarity = cv2.compareHist(hist_incoming, hist_reg, cv2.HISTCMP_CORREL)
-        if similarity > highest_score and similarity > 0.60:
-            highest_score = similarity
+        if len(known_encodings) == 0: continue
+        
+        # Ikumpara ang mukha gamit ang face_distance
+        face_distance = face_recognition.face_distance([known_encodings[0]], unknown_encoding)[0]
+        
+        if face_distance < min_distance:
+            min_distance = face_distance
             best_sid = student_id
             
-    if highest_score < 0.60 or not best_sid:
+    if not best_sid:
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
         
     conn = sqlite3.connect(DB_PATH)
     row = conn.cursor().execute("SELECT student_id, name, grade, section FROM students WHERE student_id=?", (best_sid,)).fetchone()
     conn.close()
+    
     if not row:
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
+        
     return jsonify({'ok': True, 'message': f'Verified: {row[1]}', 'student_id': row[0], 'name': row[1], 'grade': row[2], 'section': row[3]})
 
 @app.route('/api/qr/<sid>')
