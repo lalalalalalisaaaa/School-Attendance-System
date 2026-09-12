@@ -1,7 +1,6 @@
 Flask==3.0.3
 gunicorn==21.2.0
 deepface
-tensorflow-cpu
 tf-keras
 opencv-python-headless
 numpy
