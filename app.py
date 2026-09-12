@@ -92,7 +92,6 @@ def register_student():
     temp_reg_path = os.path.join(BASE_DIR, f"temp_reg_{sid}.jpg")
     img_file.save(temp_reg_path)
     
-    # Basahin gamit ang face_recognition para makuha ang tunay na facial encoding
     image = face_recognition.load_image_file(temp_reg_path)
     encodings = face_recognition.face_encodings(image)
     
@@ -101,7 +100,6 @@ def register_student():
     if len(encodings) == 0:
         return jsonify({'ok': False, 'message': 'No face detected in the image. Please try again.'})
     
-    # I-save ang buong original image para magamit sa pag-verify ng face_recognition
     img_file.seek(0)
     save_path = os.path.join(FACES_DIR, f"{sid}.jpg")
     img_file.save(save_path)
@@ -130,7 +128,7 @@ def verify_face():
     unknown_encoding = unknown_encodings[0]
     
     best_sid = None
-    min_distance = 0.6  # Mas mababa, mas istrikto at sigurado ang pagkakapareho
+    min_distance = 0.6  
     
     if not os.path.exists(FACES_DIR):
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
@@ -145,7 +143,6 @@ def verify_face():
         
         if len(known_encodings) == 0: continue
         
-        # Ikumpara ang mukha gamit ang face_distance
         face_distance = face_recognition.face_distance([known_encodings[0]], unknown_encoding)[0]
         
         if face_distance < min_distance:
@@ -221,5 +218,5 @@ def export_attendance():
     return res
 
 if __name__ == '__main__':
-    threading.Timer(1.2, lambda: webbrowser.open_new("http://127.0.0.1:5000")).start()
-    app.run(debug=False, port=5000)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
