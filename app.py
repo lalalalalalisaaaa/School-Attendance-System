@@ -3,7 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, jsonify, send_file, session, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
-import face_recognition
+from deepface import DeepFace
 import numpy as np
 
 app = Flask(__name__)
@@ -92,13 +92,16 @@ def register_student():
     temp_reg_path = os.path.join(BASE_DIR, f"temp_reg_{sid}.jpg")
     img_file.save(temp_reg_path)
     
-    image = face_recognition.load_image_file(temp_reg_path)
-    encodings = face_recognition.face_encodings(image)
+    try:
+        faces = DeepFace.extract_faces(img_path=temp_reg_path, detector_backend='opencv', enforce_detection=True)
+        if len(faces) == 0:
+            if os.path.exists(temp_reg_path): os.remove(temp_reg_path)
+            return jsonify({'ok': False, 'message': 'No face detected in the image. Please try again.'})
+    except Exception:
+        if os.path.exists(temp_reg_path): os.remove(temp_reg_path)
+        return jsonify({'ok': False, 'message': 'No face detected in the image. Please try again.'})
     
     if os.path.exists(temp_reg_path): os.remove(temp_reg_path)
-    
-    if len(encodings) == 0:
-        return jsonify({'ok': False, 'message': 'No face detected in the image. Please try again.'})
     
     img_file.seek(0)
     save_path = os.path.join(FACES_DIR, f"{sid}.jpg")
@@ -118,19 +121,20 @@ def verify_face():
     temp_path = os.path.join(BASE_DIR, "temp_scan.jpg")
     img.save(temp_path)
     
-    unknown_image = face_recognition.load_image_file(temp_path)
-    if os.path.exists(temp_path): os.remove(temp_path)
-    
-    unknown_encodings = face_recognition.face_encodings(unknown_image)
-    if len(unknown_encodings) == 0:
+    try:
+        faces = DeepFace.extract_faces(img_path=temp_path, detector_backend='opencv', enforce_detection=True)
+        if len(faces) == 0:
+            if os.path.exists(temp_path): os.remove(temp_path)
+            return jsonify({'ok': False, 'message': 'No face detected.'})
+    except Exception:
+        if os.path.exists(temp_path): os.remove(temp_path)
         return jsonify({'ok': False, 'message': 'No face detected.'})
         
-    unknown_encoding = unknown_encodings[0]
-    
     best_sid = None
-    min_distance = 0.6  
+    min_distance = float('inf')
     
     if not os.path.exists(FACES_DIR):
+        if os.path.exists(temp_path): os.remove(temp_path)
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
         
     for filename in os.listdir(FACES_DIR):
@@ -138,16 +142,22 @@ def verify_face():
         student_id = filename.split(".")[0]
         known_image_path = os.path.join(FACES_DIR, filename)
         
-        known_image = face_recognition.load_image_file(known_image_path)
-        known_encodings = face_recognition.face_encodings(known_image)
-        
-        if len(known_encodings) == 0: continue
-        
-        face_distance = face_recognition.face_distance([known_encodings[0]], unknown_encoding)[0]
-        
-        if face_distance < min_distance:
-            min_distance = face_distance
-            best_sid = student_id
+        try:
+            result = DeepFace.verify(
+                img1_path=temp_path,
+                img2_path=known_image_path,
+                model_name="VGG-Face",
+                detector_backend="opencv",
+                enforce_detection=False
+            )
+            distance = result['distance']
+            if result['verified'] and distance < min_distance:
+                min_distance = distance
+                best_sid = student_id
+        except Exception:
+            continue
+            
+    if os.path.exists(temp_path): os.remove(temp_path)
             
     if not best_sid:
         return jsonify({'ok': False, 'message': 'Face not recognized.'})
