@@ -1,7 +1,5 @@
-Flask==3.0.3
-gunicorn==21.2.0
-deepface
-tf-keras
+Flask
+gunicorn
 opencv-python-headless
 numpy
 qrcode
