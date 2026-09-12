@@ -1,6 +1,0 @@
-services:
-  - type: web
-    name: school-attendance-system
-    env: python
-    buildCommand: "apt-get update && apt-get install -y cmake build-essential && pip install -r requirements.txt"
-    startCommand: "gunicorn app:app"
