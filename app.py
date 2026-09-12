@@ -103,7 +103,7 @@ def register_student():
     else:
         face_roi = k_img
         
-    face_roi = cv2.resize(face_roi, (150, 150))
+    face_roi = cv2.resize(face_roi, (200, 200))
     face_roi = cv2.equalizeHist(face_roi)
     cv2.imwrite(os.path.join(FACES_DIR, f"{sid}.jpg"), face_roi)
     
@@ -113,46 +113,61 @@ def register_student():
     conn.close()
     return jsonify({'ok': True, 'message': f"Student {f.get('name')} registered!"})
 
+def process_face(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+    if len(faces) == 0:
+        return None
+    (x, y, w, h) = max(faces, key=lambda f: f[2] * f[3])
+    face_roi = gray[y:y+h, x:x+w]
+    face_resized = cv2.resize(face_roi, (200, 200))
+    return cv2.equalizeHist(face_resized)
+
 @app.route('/api/verify_face', methods=['POST'])
 def verify_face():
     img = request.files.get('face_scan')
     if not img: return jsonify({'ok': False, 'message': 'No image.'})
-    
     temp_path = os.path.join(BASE_DIR, "temp_scan.jpg")
     img.save(temp_path)
-    
-    face_cas = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-    target_img = cv2.imread(temp_path, cv2.IMREAD_GRAYSCALE)
+    target_img = cv2.imread(temp_path)
     if os.path.exists(temp_path): os.remove(temp_path)
     if target_img is None: return jsonify({'ok': False, 'message': 'Image error.'})
     
-    tf = face_cas.detectMultiScale(target_img, 1.1, 4)
-    if len(tf) > 0:
-        x, y, w, h = tf[0]
-        t_roi = target_img[y:y+h, x:x+w]
-    else:
-        t_roi = target_img
+    processed_incoming = process_face(target_img)
+    if processed_incoming is None:
+        return jsonify({'ok': False, 'message': 'No face detected.'})
         
-    t_roi = cv2.resize(t_roi, (150, 150))
-    t_roi = cv2.equalizeHist(t_roi)
+    best_sid, highest_score = None, -1.0
+    hist_incoming = cv2.calcHist([processed_incoming], [0], None, [256], [0, 256])
+    cv2.normalize(hist_incoming, hist_incoming, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
     
-    best_sid, max_s = None, 0.0
-    for file in os.listdir(FACES_DIR):
-        if not file.endswith('.jpg'): continue
-        sid = file.split('.')[0]
-        k_roi = cv2.imread(os.path.join(FACES_DIR, file), cv2.IMREAD_GRAYSCALE)
-        if k_roi is None: continue
-        try:
-            res = cv2.matchTemplate(t_roi, k_roi, cv2.TM_CCOEFF_NORMED)
-            _, val, _, _ = cv2.minMaxLoc(res)
-            if val > max_s: max_s, best_sid = val, sid
-        except: continue
+    if not os.path.exists(FACES_DIR):
+        return jsonify({'ok': False, 'message': 'Face not recognized.'})
         
-    if max_s < 0.60 or not best_sid: return jsonify({'ok': False, 'message': 'Face not recognized.'})
-    
+    for filename in os.listdir(FACES_DIR):
+        if not filename.endswith(".jpg"): continue
+        student_id = filename.split(".")[0]
+        reg_img = cv2.imread(os.path.join(FACES_DIR, filename), cv2.IMREAD_GRAYSCALE)
+        if reg_img is None: continue
+        
+        reg_resized = cv2.resize(reg_img, (200, 200))
+        hist_reg = cv2.calcHist([reg_resized], [0], None, [256], [0, 256])
+        cv2.normalize(hist_reg, hist_reg, alpha=0, beta=1, norm_type=cv2.NORM_MINMAX)
+        
+        similarity = cv2.compareHist(hist_incoming, hist_reg, cv2.HISTCMP_CORREL)
+        if similarity > highest_score and similarity > 0.60:
+            highest_score = similarity
+            best_sid = student_id
+            
+    if highest_score < 0.60 or not best_sid:
+        return jsonify({'ok': False, 'message': 'Face not recognized.'})
+        
     conn = sqlite3.connect(DB_PATH)
     row = conn.cursor().execute("SELECT student_id, name, grade, section FROM students WHERE student_id=?", (best_sid,)).fetchone()
     conn.close()
+    if not row:
+        return jsonify({'ok': False, 'message': 'Face not recognized.'})
     return jsonify({'ok': True, 'message': f'Verified: {row[1]}', 'student_id': row[0], 'name': row[1], 'grade': row[2], 'section': row[3]})
 
 @app.route('/api/qr/<sid>')
