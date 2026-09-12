@@ -3,8 +3,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Flask, render_template, request, jsonify, send_file, session, make_response
 from werkzeug.security import generate_password_hash, check_password_hash
-from deepface import DeepFace
-import numpy as np
 
 app = Flask(__name__)
 app.secret_key = "attendance-system-secure-key"
@@ -29,7 +27,7 @@ def init_db():
 init_db()
 
 def get_greeting():
-    h = datetime.now(ZoneInfo("Asia/Manila")).hour
+    h = datetime.now().hour
     return "Good morning" if h < 12 else ("Good afternoon" if h < 18 else "Good evening")
 
 def send_sms(phone, parent, name, grade, section, kind, ts):
@@ -88,24 +86,7 @@ def register_student():
         return jsonify({'ok': False, 'message': 'All fields are required.'})
     
     sid = f.get('student_id')
-    img_file = request.files.get('face_image')
-    temp_reg_path = os.path.join(BASE_DIR, f"temp_reg_{sid}.jpg")
-    img_file.save(temp_reg_path)
-    
-    try:
-        faces = DeepFace.extract_faces(img_path=temp_reg_path, detector_backend='opencv', enforce_detection=True)
-        if len(faces) == 0:
-            if os.path.exists(temp_reg_path): os.remove(temp_reg_path)
-            return jsonify({'ok': False, 'message': 'No face detected in the image. Please try again.'})
-    except Exception:
-        if os.path.exists(temp_reg_path): os.remove(temp_reg_path)
-        return jsonify({'ok': False, 'message': 'No face detected in the image. Please try again.'})
-    
-    if os.path.exists(temp_reg_path): os.remove(temp_reg_path)
-    
-    img_file.seek(0)
-    save_path = os.path.join(FACES_DIR, f"{sid}.jpg")
-    img_file.save(save_path)
+    request.files.get('face_image').save(os.path.join(FACES_DIR, f"{sid}.jpg"))
     
     conn = sqlite3.connect(DB_PATH)
     conn.cursor().execute("REPLACE INTO students VALUES (?, ?, ?, ?, ?, ?)", (sid, f.get('name'), f.get('grade'), f.get('section'), f.get('parent'), f.get('phone')))
@@ -118,50 +99,41 @@ def verify_face():
     img = request.files.get('face_scan')
     if not img: return jsonify({'ok': False, 'message': 'No image.'})
     
-    temp_path = os.path.join(BASE_DIR, "temp_scan.jpg")
+    temp_path = os.path.join(BASE_DIR, "temp.jpg")
     img.save(temp_path)
     
-    try:
-        faces = DeepFace.extract_faces(img_path=temp_path, detector_backend='opencv', enforce_detection=True)
-        if len(faces) == 0:
-            if os.path.exists(temp_path): os.remove(temp_path)
-            return jsonify({'ok': False, 'message': 'No face detected.'})
-    except Exception:
-        if os.path.exists(temp_path): os.remove(temp_path)
-        return jsonify({'ok': False, 'message': 'No face detected.'})
-        
-    best_sid = None
-    min_distance = float('inf')
-    
-    if not os.path.exists(FACES_DIR):
-        if os.path.exists(temp_path): os.remove(temp_path)
-        return jsonify({'ok': False, 'message': 'Face not recognized.'})
-        
-    for filename in os.listdir(FACES_DIR):
-        if not filename.endswith(".jpg"): continue
-        student_id = filename.split(".")[0]
-        known_image_path = os.path.join(FACES_DIR, filename)
-        
-        try:
-            result = DeepFace.verify(
-                img1_path=temp_path,
-                img2_path=known_image_path,
-                model_name="VGG-Face",
-                detector_backend="opencv",
-                enforce_detection=False
-            )
-            distance = result['distance']
-            if result['verified'] and distance < min_distance:
-                min_distance = distance
-                best_sid = student_id
-        except Exception:
-            continue
-            
+    face_cas = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+    target_img = cv2.imread(temp_path, cv2.IMREAD_GRAYSCALE)
     if os.path.exists(temp_path): os.remove(temp_path)
-            
-    if not best_sid:
-        return jsonify({'ok': False, 'message': 'Face not recognized.'})
+    if target_img is None: return jsonify({'ok': False, 'message': 'Image error.'})
+    
+    tf = face_cas.detectMultiScale(target_img, 1.1, 5, minSize=(50, 50))
+    if len(tf) == 0:
+        return jsonify({'ok': False, 'message': 'No face detected. Please face the camera properly.'})
+    
+    (x, y, w, h) = tf[0]
+    t_roi = cv2.resize(target_img[y:y+h, x:x+w], (100, 100))
+    
+    best_sid, max_s = None, 0.0
+    for file in os.listdir(FACES_DIR):
+        if not file.endswith('.jpg'): continue
+        sid = file.split('.')[0]
+        k_img = cv2.imread(os.path.join(FACES_DIR, file), cv2.IMREAD_GRAYSCALE)
+        if k_img is None: continue
+        kf = face_cas.detectMultiScale(k_img, 1.1, 5, minSize=(50, 50))
+        if len(kf) == 0: continue
         
+        (kx, ky, kw, kh) = kf[0]
+        k_roi = cv2.resize(k_img[ky:ky+kh, kx:kx+kw], (100, 100))
+        try:
+            res = cv2.matchTemplate(t_roi, k_roi, cv2.TM_CCOEFF_NORMED)
+            _, val, _, _ = cv2.minMaxLoc(res)
+            if val > max_s: max_s, best_sid = val, sid
+        except: continue
+        
+    if max_s < 0.65 or not best_sid: 
+        return jsonify({'ok': False, 'message': 'Face not recognized.'})
+    
     conn = sqlite3.connect(DB_PATH)
     row = conn.cursor().execute("SELECT student_id, name, grade, section FROM students WHERE student_id=?", (best_sid,)).fetchone()
     conn.close()
@@ -228,5 +200,5 @@ def export_attendance():
     return res
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    threading.Timer(1.2, lambda: webbrowser.open_new("http://127.0.0.1:5000")).start()
+    app.run(debug=False, port=5000)
