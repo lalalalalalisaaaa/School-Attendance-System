@@ -1,8 +1,8 @@
 Flask==3.0.3
 gunicorn==21.2.0
-deepface==0.0.79
-tf-keras==2.15.0
-tensorflow-cpu==2.15.0
-opencv-python-headless==4.9.0.80
-numpy==1.26.4
-qrcode==7.4.2
+deepface
+tensorflow-cpu
+tf-keras
+opencv-python-headless
+numpy
+qrcode
