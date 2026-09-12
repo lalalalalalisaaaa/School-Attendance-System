@@ -1,7 +1,6 @@
-FROM python:3.9-slim
+FROM python:3.9-slim-bullseye
 
-# Mag-install ng mga kailangang build tools para sa dlib at OpenCV
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     libgl1-mesa-glx \
